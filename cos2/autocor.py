@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.io import wavfile
 from statsmodels.tsa.stattools import acf
+from scipy.signal import find_peaks
 
 
 # Загрузка аудиофайла
@@ -58,8 +59,7 @@ plt.grid(True)
 plt.legend()
 plt.show()
 
-nlags = len(x) // 2
-acf_values = acf(x, nlags=nlags, adjusted=True)
+acf_values = acf(x, nlags=2000, adjusted=True)
 
 # Построение графика АКФ
 plt.figure(figsize=(10, 6))
@@ -70,15 +70,13 @@ plt.ylabel('Значение АКФ')
 plt.grid(True)
 plt.legend()
 
-#Первый пик АКФ после m = 0
-peaks = np.where((acf_values[1:-1] > acf_values[:-2]) & (acf_values[1:-1] > acf_values[2:]))[0] + 1
-first_peak = peaks[0] if len(peaks) > 0 else None
-
-if first_peak is not None:
-    # Оценка частоты основного тона
-    f0 = fs / first_peak
-    print(f"Частота основного тона: {f0:.2f} Гц")
+peaks, _ = find_peaks(acf_values[20:], height=0.1, distance=10)
+if len(peaks) > 0:
+    m_max = peaks[0] + 20
+    plt.scatter(m_max, acf_values[m_max], color='red', label=f"Пик (m={m_max})")  # метка пика
+    f_acf = 1 / (m_max / fs)
+    print(f"Оценка основного тона по АКФ: {f_acf:.2f} Гц")
 else:
-    print("Пики не найдены. Основной тон не обнаружен.")
+    print("Пики не найдены!")
 
 plt.show()

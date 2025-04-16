@@ -1,56 +1,35 @@
 import numpy as np
 import pyreaper
 import scipy.io.wavfile as wavfile
-from scipy.signal import windows
+from scipy.signal.windows import triang
 
 
-def psola(x, fs, k):
-    """
-    Изменяет частоту основного тона речи с помощью алгоритма PSOLA.
-    
-    Параметры:
-        x (np.array): Входной сигнал.
-        fs (float): Частота дискретизации (в герцах).
-        k (float): Коэффициент изменения частоты основного тона.
-    
-    Возвращает:
-        np.array: Сигнал с изменённой частотой основного тона.
-    """
-    x = x.astype(np.float32) / np.max(np.abs(x))
+def psola(x, fs, f_times, f0, k):
+    voiced_indices = f0 != -1
+    voiced_times = f_times[voiced_indices]
+    voiced_f0 = f0[voiced_indices]
+    if len(voiced_times) == 0:
+        print("Тоновые участки не найдены!")
+        return x
+    output = np.zeros(len(x))
+    window = triang(int(fs / np.mean(voiced_f0) * 2))
 
-    # Подготовка данных для REAPER
-    int16_info = np.iinfo(np.int16)
-    x_reaper = x * min(int16_info.min, int16_info.max)
-    x_reaper = x_reaper.astype(np.int16)
+    for i, t_center in enumerate(voiced_times):
+        T = fs / voiced_f0[i]
+        center_idx = int(t_center * fs)
+        half_len = len(window) // 2
+        start_idx = max(0, center_idx - half_len)
+        end_idx = min(len(x), center_idx + half_len)
+        chunk = np.zeros(len(window))
+        chunk_len = end_idx - start_idx
+        chunk[:chunk_len] = x[start_idx:end_idx]
+        chunk *= window
+        new_center = int(t_center * fs / k)
+        new_start = max(0, new_center - half_len)
+        new_end = min(len(output), new_center + half_len)
+        output[new_start:new_end] += chunk[:new_end - new_start]
 
-    pm_times, pm, f_times, f, _ = pyreaper.reaper(x_reaper, fs)
-
-    segment_centers = pm_times[pm == 1]
-    segment_centers = (segment_centers * fs).astype(int)
-
-    T = (fs / np.mean(f[f != -1])).astype(int)
-
-    segment_length = 2 * T
-
-    window = windows.triang(segment_length)
-
-    y = np.zeros(int(len(x) * k))
-    output_index = 0
-
-    for center in segment_centers:
-        start = max(0, center - T)
-        end = min(len(x), center + T)
-
-        segment = x[start:end]
-
-        if len(segment) == segment_length:
-            segment *= window
-
-        y[output_index:output_index + len(segment)] += segment
-        output_index += int(k * T)
-
-    y = y / np.max(np.abs(y))
-    return y
+    return output / np.max(np.abs(output))
 
 
 fs, x = wavfile.read('record.wav')
@@ -59,10 +38,16 @@ fs, x = wavfile.read('record.wav')
 if len(x.shape) > 1:
     x = x[:, 0]
 
+x = x.astype(np.float32) / np.max(np.abs(x))
+
+int16_info = np.iinfo(np.int16)
+x_int16 = np.clip(x * 32767, int16_info.min, int16_info.max).astype(np.int16)
+pm_times, pm, f_times, f0, _ = pyreaper.reaper(x_int16, fs)
+
 # Изменение тона (k > 1: выше, k < 1: ниже)
-k = 1.5  # Пример: повышаем тон на 50%
-y = psola(x, fs, k)
+k = 1.2  # Пример: повышаем тон на 20%
+x_psola = psola(x, fs, f_times, f0, k)
 
-wavfile.write('output_psola.wav', fs, np.float32(y))
+wavfile.write('output.wav', fs, (x_psola * 32767).astype(np.int16))
 
-print("Результат сохранён в файл output_psola.wav")
+print("Результат сохранён в файл output.wav")
